@@ -1,0 +1,7 @@
+# CPU 推理依赖；包括固定版本的间接依赖，不安装训练框架。
+numpy==2.5.3
+onnxruntime==1.26.0
+filelock==4.0.1
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2

@@ -1,0 +1,19 @@
+.venv*/
+.tools/
+__pycache__/
+*.py[cod]
+config.local.json
+secrets/
+runs/
+*.log
+.pytest_cache/
+
+.native/
+
+.build/
+
+# 本地模型权重不纳入源码快照
+*.onnx
+*.pt
+*.pth
+*.safetensors

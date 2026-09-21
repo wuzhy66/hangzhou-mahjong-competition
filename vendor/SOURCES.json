@@ -1,0 +1,131 @@
+{
+  "source_root": "/home/wuzhiyuan01/rlai-car",
+  "source_head": "b4da339573b7c141db92af0cfd6a4f77c364cfac",
+  "note": "SHA256 标识包含未提交修改的实际文件；完整文件逐字节复制。",
+  "files": [
+    {
+      "path": "mahjong/__init__.py",
+      "sha256": "fa6d85e7a746581d9c1b04f663d49fb3f884ff49af3d2265793b32a012460963"
+    },
+    {
+      "path": "mahjong/observation.py",
+      "sha256": "fab82fa54114673c78c3734b3c8ac6de6446b8b9f23d8b94e383abbc52d06fd7"
+    },
+    {
+      "path": "mahjong/platform/__init__.py",
+      "sha256": "85e7079715e1d9198cf4d2cfd103590e2a3b64ddeca93515121585edbbdf6814"
+    },
+    {
+      "path": "mahjong/platform/decision.py",
+      "sha256": "de614f8cdbaba606773798a224559941bbefa51e643467c5996d36cbca1f4086"
+    },
+    {
+      "path": "mahjong/platform/river.py",
+      "sha256": "f15c7c23039fc126ae8f7bb0c1256eca156bb2ef461e9ad55fef90723e8dbe86"
+    },
+    {
+      "path": "mahjong/platform/postprocess.py",
+      "sha256": "5e90e03da68a30433dfdbe4edb889d1c3fffa5b0483b9c0d6532bf1821363334"
+    },
+    {
+      "path": "mahjong/platform/discard_search.py",
+      "sha256": "e38ff167a7ccc85174cf09fe70e2b42099f71956af7b6752806c1cf070868354"
+    },
+    {
+      "path": "mahjong/platform/discard_search_native.cpp",
+      "sha256": "119d2ff01283096c623ca7584e3aadcc5846e0a6f83bef43276c549baf6f6789"
+    },
+    {
+      "path": "mahjong/rule_ai/__init__.py",
+      "sha256": "b43bad171de6e0211b3ab8754c4cdc0a60c3daae2fe1aaa561aaf6e4a8e99320"
+    },
+    {
+      "path": "mahjong/rule_ai/policy.py",
+      "sha256": "87a29b3214c99a075906535de9c4acf289852bc46b10c82440ba779a6f6c13bf"
+    },
+    {
+      "path": "mahjong/rule_ai/search_native.cpp",
+      "sha256": "d30241d211e6895c57ab9da19f33ee3281e3fa03fa9ce78fc62e1669ec0ed71a"
+    },
+    {
+      "path": "onnx_tools/__init__.py",
+      "sha256": "264955cb790b494563c4398383dfa85b30e87ae060d0c6287a105d96f22bce3c"
+    },
+    {
+      "path": "onnx_tools/policy.py",
+      "sha256": "3031f741e6154d853ffe4527b542e5b7f08ba869647c374e0505d04dfbe1a83d"
+    },
+    {
+      "path": "mahjong/engine_compat/__init__.py",
+      "sha256": "f41a7e05d127509fd31cc05c6cdcaa408cfefe06e2c6904d9afd0bb73689b2ec"
+    },
+    {
+      "path": "mahjong/engine_compat/catch_play.py",
+      "sha256": "ee3f8ac359d7ec1171857a35c894f219f5da422238d344d5a63af73a0da3efd9"
+    },
+    {
+      "path": "mahjong/engine_compat/piao.py",
+      "sha256": "c4406f6fd5fcfa3385465b2d110716fb69c8dca8252503d0d1c07cf227faa8eb"
+    },
+    {
+      "path": "mahjong/engine_compat/prior.py",
+      "sha256": "8ccbc3934fe87caf78d9bc4349480de6ca12e2f4d678fb3e51458c1e9991b16c"
+    },
+    {
+      "path": "mahjong/engine_compat/flags.py",
+      "sha256": "f93a50ab9ea8487daa316e8f007fa7367cc3caf2fd3339310435623a9e160cbe"
+    },
+    {
+      "path": "mahjong/engine_compat/settlement.py",
+      "sha256": "a877e91e3590863176b92922ed3e1310b4f2b5461f6b79de027265e81f74c3ac"
+    },
+    {
+      "path": "mahjong/engine_compat/win.py",
+      "sha256": "c6c64474a0fa75e3d222cbe16eba8d6fdcedbe2ad90757077ace89900b28ac9b"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/__init__.py",
+      "sha256": "5d9580dadc01f6e7a8920df75c5ba8bac73f1c5f60b026b06233d1b45b9c3953"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/tiles.py",
+      "sha256": "a4d9e4d7ae23d36995966e2341bb7ffdac28bd2f75371fcc5bdf2c39358e5814"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/hu.py",
+      "sha256": "9b72fea6279e35b428c8b66515918b13b1c96b8291ac6022a6b82f6afe620120"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/fan.py",
+      "sha256": "1d890706081cdf76d354ec696307901373b634387866296fe25a56cd6fbab4a0"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/engine.py",
+      "sha256": "5ac3018c6fc94e2e882d2bcd980303ae90eb63c5e9320795b118e5b5e772b838"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/adapter.py",
+      "sha256": "98fb998c5861fc9a5dab415f6ac3cfd78087fd393bcf0a04e6d89d0f3da8ac4f"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/hzmj/bots.py",
+      "sha256": "cf4b6c64169bec9d5fa5974c3b4c8b4ee8177b9eadb7b0a421fa17e822bf9640"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/mjenv/__init__.py",
+      "sha256": "ca336650a94b29ce116ef54c0aaa1be46069e12a3adf43c9fb76e28f9f078de6"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/mjenv/fastrule.py",
+      "sha256": "a2b6f18d3629cc039d237c1f7062661d7b1d6deca738a00890e8d0deac58c4e9"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/mjenv/encode.py",
+      "sha256": "9b9d887d34c15a612ce7b17ba5203735ed5981f65e4940212e15aef8eefaff01"
+    },
+    {
+      "path": "mahjong/hangzhou-mahjong/mjenv/spaces.py",
+      "sha256": "c1be0d2019a31c4afa6a602227d52995c91bc08a90ba8a11bf1e8f219dd5325c"
+    }
+  ]
+}

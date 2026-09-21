@@ -1,0 +1,6 @@
+{
+  "token": "",
+  "onnx": "bc-mortal-v4-r1-13.onnx",
+  "mode": "auto",
+  "server": "https://10.240.169.190:18080"
+}
