@@ -1338,6 +1338,27 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
             stop.wait(min(.25, poll) if status == "running" and not futures else poll)
 
 
+def ranking_identity_rooms(identity, me):
+    """仅完整且属于启动身份的 active 列表可证明空闲；未知响应不能授权 match。"""
+    import re
+
+    uid = identity.get('user_id') if isinstance(identity, dict) else None
+    if uid and me.get('user_id') and uid != me['user_id']:
+        raise ValueError('恢复身份与启动身份不同')
+    active = identity.get('active_games') if isinstance(identity, dict) else None
+    if not uid or not me.get('user_id') or not isinstance(active, list):
+        return None
+    rooms = set()
+    for value in active:
+        gid = game_id(value)
+        match = (re.fullmatch(r'(a_[a-zA-Z0-9]+)_r\d+_b\d+_t\d+', gid)
+                 if isinstance(gid, str) else None)
+        if not match:
+            return None
+        rooms.add(match[1])
+    return rooms
+
+
 def reconcile_match(client, me, stop):
     """不确定的 match 先核对本人房间；连续六次明确空响应后才允许新匹配。"""
     import re
@@ -1399,7 +1420,7 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
         raise ValueError("账号仍有进行中的对局，请指定 --resume-room 接管原房间")
     stop = stop or threading.Event()
     room, futures, completed = resume_room, {}, set()
-    room_visibility_empty_checks = 0
+    room_visibility_empty_reads = 0
     with workers(10, stop) as pool:
         while not stop.is_set():
             reap(futures, completed)
@@ -1416,61 +1437,79 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
                     if room is None or stop.is_set():
                         continue
                 client.record("matched", room_id=room)
-                room_visibility_empty_checks = 0
+                room_visibility_empty_reads = 0
             try:
                 state = request(client, f"/api/tournaments/{room}", stop)
             except ApiError as error:
                 if error.status != 404:
                     raise
-                # 房间短暂不可见不等于匹配失败；先核对本人仍在该房间。
-                # 只重读GET，不重发match，也不接管其他房间。
-                # match 已成功，但 me 的 active 索引也可能尚未可见。
-                # 最多补查十次身份；只有确认同房本人 active 才重读房间。
-                # 全程不重发 match，也不因其他房间 active 而接管。
+                # 房间不可见时只读本人身份；未知或失败响应会打断连续空闲证据。
                 client.record("room_visibility_check", room_id=room, status=404)
+                owned = False
+                owned_count = 0
                 for attempt in range(10):
+                    if stop.is_set():
+                        raise InterruptedError("运行已停止")
                     try:
-                        identity = request(client, "/api/me", stop)
-                    except ApiError as identity_error:
-                        client.record("room_identity_error", room_id=room,
-                                      status=identity_error.status)
-                        raise
-                    active = identity.get("active_games") or []
-                    owned = [game_id(g) for g in active
-                             if isinstance(game_id(g), str) and game_id(g).startswith(room + "_r")]
-                    if owned or active:
-                        break
-                    client.record("room_identity_pending", room_id=room, status=404,
-                                  attempt=attempt + 1)
+                        identity = client.api("/api/me")
+                    except (ApiError, *NETWORK) as identity_error:
+                        room_visibility_empty_reads = 0
+                        if not retryable(identity_error):
+                            client.record("room_identity_error", room_id=room,
+                                          status=getattr(identity_error, "status", None))
+                            raise
+                        client.record("room_identity_pending", room_id=room,
+                                      reason="identity_request_failed",
+                                      error_type=type(identity_error).__name__,
+                                      status=getattr(identity_error, "status", None))
+                    else:
+                        rooms = ranking_identity_rooms(identity, me)
+                        if rooms is None:
+                            room_visibility_empty_reads = 0
+                            client.record("room_identity_pending", room_id=room,
+                                          reason="identity_incomplete_or_ambiguous")
+                        elif rooms:
+                            room_visibility_empty_reads = 0
+                            if rooms != {room}:
+                                client.record("room_identity_conflict", room_id=room, status=404,
+                                              active_games=len(identity["active_games"]))
+                                raise error
+                            owned, owned_count = True, len(identity["active_games"])
+                            break
+                        else:
+                            room_visibility_empty_reads += 1
+                            client.record("room_identity_pending", room_id=room, status=404,
+                                          attempt=attempt + 1)
+                            if room_visibility_empty_reads >= 60:
+                                break
                     if attempt < 9 and stop.wait(.5):
                         raise InterruptedError("运行已停止")
-                if not owned:
-                    if active:
-                        # 本人明确在其他房间，不能把该房误当作当前 match 的房间。
-                        client.record("room_identity_conflict", room_id=room, status=404,
-                                      active_games=len(active))
-                        raise
-                    # match 已返回 room_id，但房间和 active_games 两个索引可能同时延迟。
-                    # 保留原房间继续只读 GET；不能因短暂双空而退出或再次 match。
+                if owned:
+                    client.record("room_visibility_retry", room_id=room, status=404,
+                                  owned_active_games=owned_count)
+                else:
                     client.record("room_visibility_pending", room_id=room, status=404,
-                                  confirmed_empty_reads=10)
-                    room_visibility_empty_checks += 1
-                    if room_visibility_empty_checks >= 6:
-                        # 房间和本人 active 索引持续双空约 40 秒后，原房间已不再可恢复。
-                        # 此时才释放 room，下一轮走既有 match 恢复逻辑；短暂索引延迟仍只 GET。
-                        client.record("room_visibility_abandoned", room_id=room, status=404,
-                                      confirmed_empty_reads=room_visibility_empty_checks * 10)
-                        room = None
-                        room_visibility_empty_checks = 0
-                        continue
-                    if stop.wait(2):
-                        raise InterruptedError("运行已停止")
-                    continue
-                client.record("room_visibility_retry", room_id=room, status=404,
-                              owned_active_games=len(owned))
-                stop.wait(2)
+                                  confirmed_empty_reads=room_visibility_empty_reads)
+                    if room_visibility_empty_reads >= 60:
+                        if futures:
+                            # 本地游戏 worker 尚未结束时，不得另开房间并遗留旧 worker。
+                            room_visibility_empty_reads = 0
+                            client.record("room_visibility_pending_workers", room_id=room,
+                                          active_workers=len(futures))
+                        else:
+                            # 有界宽限不是服务端幂等保证；再次核对本人房间后才决定是否新匹配。
+                            client.record("room_visibility_abandoned", room_id=room, status=404,
+                                          confirmed_empty_reads=room_visibility_empty_reads)
+                            room = reconcile_match(client, me, stop)
+                            room_visibility_empty_reads = 0
+                            completed.clear()
+                            if room is not None and not stop.is_set():
+                                client.record("matched", room_id=room, recovered=True)
+                            continue
+                if stop.wait(2):
+                    raise InterruptedError("运行已停止")
                 continue
-            room_visibility_empty_checks = 0
+            room_visibility_empty_reads = 0
             write_json(client.output / "status.json", state)
             if state.get("status") in TERMINAL:
                 client.record("room_finished", room_id=room, result=state)

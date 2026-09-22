@@ -61,8 +61,9 @@ def observation(snapshot, you_cai_bi_kao=False, public_events=None):
                 raise ValueError('完整公开历史与副露数量不一致')
             for meld, origin in zip(player.melds, meld_sources[actor]):
                 meld.from_seat = origin
-        # 独立保存后处理的圈状态，不改变 encode 对 GameView.catch_play 的既有语义。
-        view.postprocess_catch_origin = catch_origin
+        # 当前快照的显式 -1 表示圈已结束，不能被上圈公开弃牌历史重新激活。
+        # 独立保存后处理状态，不改变 encode 对 GameView.catch_play 的既有语义。
+        view.postprocess_catch_origin = god.get('god_discarder_seat', catch_origin)
         # chain 同时含杠与飘；上游缺省 piao=chain 会把杠开错误编码为财飘。
         chain = view.players[seat].chain_count
         view.players[seat].piao = hero_chain[-chain:].count('piao') if chain else 0
@@ -71,6 +72,12 @@ def observation(snapshot, you_cai_bi_kao=False, public_events=None):
         view.gang_supplement = (last_hero_action == 'gang' and chain > 0
                                 and view.phase == 'draw' and view.turn == seat
                                 and view.drawn_tile is not None)
+        if ('god_discarder_seat' not in god and view.phase == 'draw'
+                and view.turn == catch_origin and view.drawn_tile is not None
+                and not view.gang_supplement):
+            # 旧快照只能从历史还原；自然摸牌回到发起者时已走完一圈。
+            # 杠补不推进轮次，不能据此解除仍在进行中的抓打圈。
+            view.postprocess_catch_origin = -1
     actions = adapter.legal_actions(view, seat)
     if not actions:
         return None, view, actions

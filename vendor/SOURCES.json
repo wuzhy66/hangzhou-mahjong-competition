@@ -17,7 +17,7 @@
     },
     {
       "path": "mahjong/platform/decision.py",
-      "sha256": "de614f8cdbaba606773798a224559941bbefa51e643467c5996d36cbca1f4086"
+      "sha256": "62548b50a90a8d7cfb0025ae094d375677cf91ea6ee04943e2610c51a1e7e78c"
     },
     {
       "path": "mahjong/platform/river.py",
