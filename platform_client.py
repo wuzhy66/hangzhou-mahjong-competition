@@ -1338,6 +1338,60 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
             stop.wait(min(.25, poll) if status == "running" and not futures else poll)
 
 
+def reconcile_match(client, me, stop):
+    """不确定的 match 先核对本人房间；连续六次明确空响应后才允许新匹配。"""
+    import re
+
+    empty_reads = 0
+    # 每次先等待 5 秒，六次明确空响应至少覆盖 30 秒索引宽限。
+    # 宽限是有界恢复策略，不是服务端幂等保证；未知响应继续等待。
+    while not stop.wait(5):
+        try:
+            identity = client.api('/api/me')
+        except (ApiError, *NETWORK) as error:
+            if not retryable(error):
+                raise
+            empty_reads = 0
+            client.record('match_recovery_identity_retry', error_type=type(error).__name__,
+                          status=getattr(error, 'status', None))
+            continue
+        if stop.is_set():
+            return None
+        uid = identity.get('user_id') if isinstance(identity, dict) else None
+        if uid and me.get('user_id') and uid != me['user_id']:
+            raise ValueError('match 恢复身份与启动身份不同')
+        active = identity.get('active_games') if isinstance(identity, dict) else None
+        if not uid or not me.get('user_id') or not isinstance(active, list):
+            empty_reads = 0
+            client.record('match_recovery_pending', reason='identity_incomplete')
+            continue
+        if active:
+            empty_reads = 0
+            rooms = set()
+            for value in active:
+                gid = game_id(value)
+                match = (re.fullmatch(r'(a_[a-zA-Z0-9]+)_r\d+_b\d+_t\d+', gid)
+                         if isinstance(gid, str) else None)
+                if not match:
+                    break
+                rooms.add(match[1])
+            else:
+                if len(rooms) == 1:
+                    room = rooms.pop()
+                    client.record('match_recovery_resumed', room_id=room,
+                                  active_games=len(active))
+                    return room
+            client.record('match_recovery_pending', reason='active_room_ambiguous',
+                          active_games=len(active))
+            continue
+        empty_reads += 1
+        client.record('match_recovery_empty', confirmed_reads=empty_reads)
+        if empty_reads >= 6:
+            client.record('match_recovery_rematch_allowed', confirmed_reads=empty_reads)
+            return None
+    return None
+
+
 def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, poll=2):
     if me.get("tournament_id"):
         raise ValueError("打榜需要全局身份令牌，不能使用参赛专用令牌")
@@ -1345,18 +1399,24 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
         raise ValueError("账号仍有进行中的对局，请指定 --resume-room 接管原房间")
     stop = stop or threading.Event()
     room, futures, completed = resume_room, {}, set()
+    room_visibility_empty_checks = 0
     with workers(10, stop) as pool:
         while not stop.is_set():
             reap(futures, completed)
             if room is None:
-                # 非幂等 match 出现不确定失败就退出；先核查账号再显式接管。
+                # 非幂等 match 不直接重发；失败后先核对本人 active 索引。
                 try:
                     room = client.api("/api/match", {})["room_id"]
-                except NETWORK as error:
-                    # 保留失败阶段用于定位；不重发可能已执行的匹配请求。
-                    client.record("match_network_failure", request_failure=getattr(error, "request_failure", None))
-                    raise
+                except (ApiError, *NETWORK) as error:
+                    if not retryable(error):
+                        raise
+                    client.record("match_network_failure", request_failure=getattr(error, "request_failure", None),
+                                  error_type=type(error).__name__, status=getattr(error, 'status', None))
+                    room = reconcile_match(client, me, stop)
+                    if room is None or stop.is_set():
+                        continue
                 client.record("matched", room_id=room)
+                room_visibility_empty_checks = 0
             try:
                 state = request(client, f"/api/tournaments/{room}", stop)
             except ApiError as error:
@@ -1385,12 +1445,32 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
                     if attempt < 9 and stop.wait(.5):
                         raise InterruptedError("运行已停止")
                 if not owned:
-                    client.record("room_identity_unconfirmed", room_id=room, status=404)
-                    raise
+                    if active:
+                        # 本人明确在其他房间，不能把该房误当作当前 match 的房间。
+                        client.record("room_identity_conflict", room_id=room, status=404,
+                                      active_games=len(active))
+                        raise
+                    # match 已返回 room_id，但房间和 active_games 两个索引可能同时延迟。
+                    # 保留原房间继续只读 GET；不能因短暂双空而退出或再次 match。
+                    client.record("room_visibility_pending", room_id=room, status=404,
+                                  confirmed_empty_reads=10)
+                    room_visibility_empty_checks += 1
+                    if room_visibility_empty_checks >= 6:
+                        # 房间和本人 active 索引持续双空约 40 秒后，原房间已不再可恢复。
+                        # 此时才释放 room，下一轮走既有 match 恢复逻辑；短暂索引延迟仍只 GET。
+                        client.record("room_visibility_abandoned", room_id=room, status=404,
+                                      confirmed_empty_reads=room_visibility_empty_checks * 10)
+                        room = None
+                        room_visibility_empty_checks = 0
+                        continue
+                    if stop.wait(2):
+                        raise InterruptedError("运行已停止")
+                    continue
                 client.record("room_visibility_retry", room_id=room, status=404,
                               owned_active_games=len(owned))
                 stop.wait(2)
                 continue
+            room_visibility_empty_checks = 0
             write_json(client.output / "status.json", state)
             if state.get("status") in TERMINAL:
                 client.record("room_finished", room_id=room, result=state)

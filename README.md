@@ -44,7 +44,7 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 
 可选字段无需填写 `null`，直接省略即可。默认单次 ONNX 推理使用 1 个 CPU 线程、日志保存在 `runs/client`、启用 TLS 验证。模型须兼容本客户端的 6122 维观测和 74 维动作布局。模型文件不随源码提交，可自行提供 `bc-mortal-v4-r1-13.onnx`、`bc-mortal-v4-0-1.onnx` 或 `bc-mortal-v4-r1-6.onnx`；选择 `bc-mortal-v4-0-1.onnx` 并沿用其原部署线程配置时，可增加 `"threads": 8`。
 
-可选 `"discard_postprocess": true` 开启 `shape_lookahead` 弃牌后处理（Top-k=4、Top-p=0.9）；默认关闭。腾蛇当前使用 r1-6、后处理开启、`"threads": 1`。
+可选 `"discard_postprocess": true` 开启 `shape_lookahead` 弃牌后处理（Top-k=4、Top-p=0.9）；默认关闭。
 
 ## 运行
 
@@ -58,6 +58,8 @@ bash run.sh
 ```
 
 `setup.sh` 不覆盖已有配置。打榜持续匹配；比赛自动报名、确认出席并处理对局，整场结束后退出。按 `Ctrl+C` 停止，同一账号不要在其他机器重复运行。
+
+打榜匹配遇到连接中断、429 或可恢复的 5xx 时，先每 5 秒查询本人 `active_games`：唯一可识别房间会自动接管；连续六次明确空响应（至少 30 秒）后才重新匹配。查询失败、字段缺失或房间归属有歧义会继续等待并清零空响应计数；401/403 或身份变化仍停止。30 秒是应对索引延迟的恢复宽限，不是服务端幂等保证。
 
 ```bash
 # 全局 token 参加指定比赛
