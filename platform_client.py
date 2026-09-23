@@ -1334,7 +1334,16 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
     if not tid:
         raise ValueError("全局令牌必须明确提供 tournament_id；也可使用门户派发的参赛令牌")
     if bound:
-        request(client, "/api/tournaments/me/rules", stop)
+        while not stop.is_set():
+            try:
+                request(client, "/api/tournaments/me/rules", stop)
+                break
+            except ApiError as error:
+                if error.status != 404:
+                    raise
+                # 赛事专用令牌的规则索引也可能在报名期短暂不可见。
+                client.record("tournament_rules_pending", tournament_id=tid, status=404)
+                stop.wait(5)
     else:
         # 全局身份未报名时不能先读赛事详情。
         attendance(client, tid, "register", stop)
@@ -1343,7 +1352,15 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
     with workers(16, stop) as pool:
         while not stop.is_set():
             reap(futures, completed)
-            state = request(client, f"/api/tournaments/{tid}", stop)
+            try:
+                state = request(client, f"/api/tournaments/{tid}", stop)
+            except ApiError as error:
+                if error.status != 404:
+                    raise
+                # 已由令牌确认赛事身份后，赛事索引偶发 404 不能终止待赛进程。
+                client.record("tournament_visibility_pending", tournament_id=tid, status=404)
+                stop.wait(5)
+                continue
             write_json(client.output / "status.json", state)
             status = state.get("status")
             stage = state.get("stage") or {}
