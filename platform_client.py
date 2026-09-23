@@ -565,6 +565,11 @@ class Projection:
         self.snapshot = copy.deepcopy(snapshot)
         self.seq = seq
         self.valid = True
+        # 只在见到剩余碰响应者全部结束且至少一个 window=peng timeout 时，
+        # 才能确认固定碰窗口结束。单个 timeout / 全部提前 pass 均不足以证明。
+        self.peng_pending = (set(snapshot.get('responding_seats') or [])
+                             if snapshot.get('phase') == 'response_peng' else None)
+        self.chi_transition_seq = None
 
     def apply(self, events):
         for event in events:
@@ -580,6 +585,8 @@ class Projection:
                 self.valid=False
                 return
             if kind=='tile_drawn':
+                self.peng_pending = None
+                self.chi_transition_seq = None
                 if actor==hero:
                     if tile_index(tile) is None:
                         self.valid=False
@@ -611,8 +618,12 @@ class Projection:
                 origin=god.get('god_discarder_seat',-1)
                 s['phase']='response_peng' if tile!='白' else 'await_draw'
                 s['responding_seats']=[p for p in range(4) if p!=actor and (not god['catch_play'] or p==origin)] if tile!='白' else []
+                self.peng_pending = set(s['responding_seats']) if tile!='白' else None
+                self.chi_transition_seq = None
                 s.pop('window_deadline_ms',None)
             elif kind in ('chi','peng','gang'):
+                self.peng_pending = None
+                self.chi_transition_seq = None
                 if kind=='peng':used=[tile]*2;tiles=[tile]*3;meld_kind='peng'
                 elif kind=='chi':
                     tiles=list(data['tiles']);used=tiles.copy();used.remove(tile);meld_kind='chi'
@@ -640,10 +651,30 @@ class Projection:
                 s['phase']='await_draw' if kind=='gang' else 'draw'
                 s.pop('window_deadline_ms',None)
             elif kind=='timeout' and data.get('kind')=='response':
-                # 一个批次可能只含部分窗口关闭事件；吃窗口一律用权威快照核实。
                 s['phase']='await_window'
+                self.chi_transition_seq = None
+                if (data.get('window') == 'peng' and self.peng_pending is not None
+                        and actor in self.peng_pending):
+                    self.peng_pending.remove(actor)
+                    if not self.peng_pending:
+                        next_seat = (s['turn'] + 1) % 4
+                        if (s.get('last_discard') not in (None, '', '白')
+                                and (not god.get('catch_play')
+                                     or god.get('god_discarder_seat') == next_seat)):
+                            s['phase']='response_chi'
+                            s['responding_seats']=[next_seat]
+                            # 旧 deadline 属于碰窗口，不能当作新吃窗口的截止时间。
+                            # 不伪造服务端时间；沿用事件视图的真实接收时间和 freshness 检查。
+                            s.pop('window_deadline_ms', None)
+                            self.chi_transition_seq = event['seq']
+                        self.peng_pending = None
+                else:
+                    # 未知窗口/已结束的吃窗口不得残留旧碰窗口的完成证明。
+                    self.peng_pending = None
             elif kind=='pass':
                 s['responding_seats']=[p for p in s.get('responding_seats',[]) if p!=actor]
+                if self.peng_pending is not None:
+                    self.peng_pending.discard(actor)
             # 平台吃碰后保留旧 baotou；此时多一张待弃牌，不能按待摸牌手牌重算。
             if actor==hero and kind in ('tile_drawn','tile_discarded','gang'):
                 counts=[0]*34
@@ -654,11 +685,13 @@ class Projection:
             god.pop('piao',None)
 
     def actionable(self):
-        if not self.valid or self.snapshot['phase'] not in ('draw','response_peng'):
+        if not self.valid or self.snapshot['phase'] not in ('draw','response_peng','response_chi'):
             return False
         view,seat=adapter.from_snapshot(self.snapshot)
         return (view.phase=='draw' and view.turn==seat or
-                view.phase=='response_peng' and seat in view.responding_seats)
+                view.phase=='response_peng' and seat in view.responding_seats or
+                view.phase=='response_chi' and self.chi_transition_seq is not None
+                and seat in view.responding_seats)
 
 
 # 状态与历史恢复
@@ -850,7 +883,8 @@ class GameState:
                 and self.projection is not None and self.projection.actionable()
                 and self.projection.seq == self.cursor):
             return dict(snapshot=copy.deepcopy(self.projection.snapshot), seq=self.cursor,
-                        _source='events', _client=delta.get('_client', {}))
+                        _source='events', _client=delta.get('_client', {}),
+                        _response_window_transition=self.projection.chi_transition_seq)
         return None
 
     @staticmethod
@@ -1032,6 +1066,10 @@ def _play_game(client, policy, gid, config, deadline, notifications, *, stop_eve
             if not snap:
                 time.sleep(.2)
                 continue
+            if (response.get('_response_window_transition') is not None
+                    and notifications.seq > response['seq']):
+                # 吃窗口重建后已知有更新水位，先消费增量；不向已过期阶段提交。
+                continue
             if response.get('finished') or snap.get('phase') == 'finished':
                 # 终局 API 只返回最终快照，不再提供增量；无需为已结束的对局补历史。
                 client.record('game_finished', game_id=gid, response=response)
@@ -1087,6 +1125,11 @@ def _play_game(client, policy, gid, config, deadline, notifications, *, stop_eve
                     observation_file = None
                     action_request_ms = None
                     if payload['action'] != 'pass':
+                        if (response.get('_response_window_transition') is not None
+                                and notifications.seq > response['seq']):
+                            client.record('response_window_advanced', game_id=gid,
+                                          snapshot_seq=response['seq'], notified_seq=notifications.seq)
+                            continue
                         deadline_ms = snap.get('window_deadline_ms')
                         remaining_ms = action_window_remaining_ms(snap)
                         if remaining_ms is not None and remaining_ms <= 0:
@@ -1129,6 +1172,7 @@ def _play_game(client, policy, gid, config, deadline, notifications, *, stop_eve
                                   trigger_seq=trigger_seq,
                                   snapshot_source=response.get('_source', 'snapshot'),
                                   history_fast_forward=response.get('_history_fast_forward', False),
+                                  response_window_transition=response.get('_response_window_transition'),
                                   observation_file=observation_file, snapshot_age_ms=snapshot_age*1000,
                                   snapshot_age_wall_ms=snapshot_age_wall_ms,
                                   submitted_at=submitted_at,
