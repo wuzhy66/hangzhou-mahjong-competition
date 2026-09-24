@@ -1284,6 +1284,18 @@ def workers(max_workers, stop):
         pool.shutdown(wait=True, cancel_futures=True)
 
 
+def error_code(error):
+    return error.detail.get('code') if isinstance(error.detail, dict) else None
+
+
+def tournament_gone(error, path, payload=None):
+    # 只允许赛事 GET 和幂等 register/ready；不能扩大到 action 或 match POST。
+    return (isinstance(error, ApiError) and error.status == 404
+            and error_code(error) == 'TOURNAMENT_GONE'
+            and path.startswith('/api/tournaments/')
+            and (payload is None or path.endswith(('/register', '/ready'))))
+
+
 def retryable(error):
     return isinstance(error, NETWORK) or isinstance(error, ApiError) and error.status in (429, 500, 502, 503, 504)
 
@@ -1295,7 +1307,7 @@ def request(client, path, stop, payload=None):
         try:
             return client.api(path, payload)
         except (ApiError, *NETWORK) as error:
-            if not retryable(error):
+            if not (retryable(error) or tournament_gone(error, path, payload)):
                 raise
             client.record("controller_retry", path=path, error_type=type(error).__name__,
                           status=getattr(error, "status", None), delay_seconds=delay)
@@ -1334,16 +1346,7 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
     if not tid:
         raise ValueError("全局令牌必须明确提供 tournament_id；也可使用门户派发的参赛令牌")
     if bound:
-        while not stop.is_set():
-            try:
-                request(client, "/api/tournaments/me/rules", stop)
-                break
-            except ApiError as error:
-                if error.status != 404:
-                    raise
-                # 赛事专用令牌的规则索引也可能在报名期短暂不可见。
-                client.record("tournament_rules_pending", tournament_id=tid, status=404)
-                stop.wait(5)
+        request(client, "/api/tournaments/me/rules", stop)
     else:
         # 全局身份未报名时不能先读赛事详情。
         attendance(client, tid, "register", stop)
@@ -1352,15 +1355,7 @@ def tournament(client, policy, me, tournament_id=None, *, stop=None, play=play_g
     with workers(16, stop) as pool:
         while not stop.is_set():
             reap(futures, completed)
-            try:
-                state = request(client, f"/api/tournaments/{tid}", stop)
-            except ApiError as error:
-                if error.status != 404:
-                    raise
-                # 已由令牌确认赛事身份后，赛事索引偶发 404 不能终止待赛进程。
-                client.record("tournament_visibility_pending", tournament_id=tid, status=404)
-                stop.wait(5)
-                continue
+            state = request(client, f"/api/tournaments/{tid}", stop)
             write_json(client.output / "status.json", state)
             status = state.get("status")
             stage = state.get("stage") or {}
@@ -1490,13 +1485,34 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
                 try:
                     room = client.api("/api/match", {})["room_id"]
                 except (ApiError, *NETWORK) as error:
-                    if not retryable(error):
-                        raise
-                    client.record("match_network_failure", request_failure=getattr(error, "request_failure", None),
-                                  error_type=type(error).__name__, status=getattr(error, 'status', None))
-                    room = reconcile_match(client, me, stop)
-                    if room is None or stop.is_set():
-                        continue
+                    if (isinstance(error, ApiError) and error.status == 403
+                            and isinstance(error.detail, dict)
+                            and error.detail.get('code') == 'FEATURE_DISABLED'):
+                        # 官方赛期会暂时关闭自由匹配。用户要求等待重新开放；每分钟
+                        # 最多一次 match，且每次重试前须重新核对本人在途房间。
+                        client.record('ranking_waiting_for_match', status=403, reason='FEATURE_DISABLED')
+                        if stop.wait(60):
+                            return
+                        owned = ranking_identity_rooms(request(client, '/api/me', stop), me)
+                        if owned is None:
+                            continue
+                        if len(owned) > 1:
+                            raise ValueError('本人同时有多个打榜房间，禁止自动接管')
+                        if not owned:
+                            continue
+                        room = owned.pop()
+                        client.record('match_recovery_resumed', room_id=room,
+                                      active_games='confirmed')
+                    else:
+                        match_wait = (isinstance(error, ApiError) and error.status == 409
+                                      and error_code(error) in ('MATCH_BUSY', 'MATCH_LIMIT_REACHED'))
+                        if not (retryable(error) or match_wait):
+                            raise
+                        client.record("match_network_failure", request_failure=getattr(error, "request_failure", None),
+                                      error_type=type(error).__name__, status=getattr(error, 'status', None))
+                        room = reconcile_match(client, me, stop)
+                        if room is None or stop.is_set():
+                            continue
                 client.record("matched", room_id=room)
                 room_visibility_empty_reads = 0
             try:
