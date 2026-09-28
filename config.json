@@ -1,6 +1,14 @@
 {
   "token": "",
   "onnx": "bc-mortal-v4-r1-13.onnx",
+  "inference_mode": "single",
+  "ensemble_onnx": [
+    "bc-mortal-v4-r1-11.onnx",
+    "bc-mortal-v4-r1-14.onnx",
+    "bc-mortal-v4-r1-12.onnx"
+  ],
   "mode": "auto",
-  "server": "https://10.240.169.190:18080"
+  "server": "https://10.240.169.190:18080",
+  "gpu_batch_size": 16,
+  "gpu_batch_wait_ms": 20
 }

@@ -1,0 +1,7 @@
+# 可选 GPU 环境；与 CPU requirements.txt 分开安装，避免两个 ORT 包覆盖同名模块。
+numpy==2.5.3
+onnxruntime-gpu[cuda,cudnn]==1.26.0
+filelock==4.0.1
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2

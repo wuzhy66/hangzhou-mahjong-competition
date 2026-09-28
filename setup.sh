@@ -2,6 +2,15 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+DEVICE=cpu
+SUFFIX=
+REQUIREMENTS=requirements.txt
+case "${1:-}" in
+  '') ;;
+  --cpu) ;;
+  --cuda) DEVICE=cuda; SUFFIX=-cuda; REQUIREMENTS=requirements-cuda.txt ;;
+  *) echo '用法：bash setup.sh [--cpu|--cuda]' >&2; exit 1 ;;
+esac
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     PLATFORM=windows
@@ -26,9 +35,9 @@ POWERSHELL
         "$(cygpath -w "$ROOT/.tools/bootstrap-uv.ps1")" \
         -InstallDirectory "$(cygpath -w "$ROOT/.tools/uv-windows")"
     fi
-    export UV_PROJECT_ENVIRONMENT="$(cygpath -w "$ROOT/.venv-windows")"
+    export UV_PROJECT_ENVIRONMENT="$(cygpath -w "$ROOT/.venv-windows${SUFFIX}")"
     export UV_PYTHON_INSTALL_DIR="$(cygpath -w "$ROOT/.tools/python-windows")"
-    PY="$ROOT/.venv-windows/Scripts/python.exe"
+    PY="$ROOT/.venv-windows${SUFFIX}/Scripts/python.exe"
     ;;
   Linux*)
     PLATFORM=linux
@@ -43,9 +52,9 @@ POWERSHELL
       fi
       UV_UNMANAGED_INSTALL="$ROOT/.tools/uv-linux" UV_NO_MODIFY_PATH=1 sh "$INSTALLER"
     fi
-    export UV_PROJECT_ENVIRONMENT="$ROOT/.venv-linux"
+    export UV_PROJECT_ENVIRONMENT="$ROOT/.venv-linux${SUFFIX}"
     export UV_PYTHON_INSTALL_DIR="$ROOT/.tools/python-linux"
-    PY="$ROOT/.venv-linux/bin/python"
+    PY="$ROOT/.venv-linux${SUFFIX}/bin/python"
     ;;
   *) echo '支持 Windows Git Bash 和 Linux Bash。' >&2; exit 1 ;;
 esac
@@ -54,7 +63,7 @@ if [[ ! -x "$PY" ]]; then
   "$UV" venv --python 3.12 --managed-python "$UV_PROJECT_ENVIRONMENT"
 fi
 "$PY" -X utf8 bootstrap.py
-"$UV" pip install --python "$UV_PROJECT_ENVIRONMENT/$([[ "$PLATFORM" == windows ]] && echo Scripts/python.exe || echo bin/python)" -r requirements.txt
+"$UV" pip install --python "$UV_PROJECT_ENVIRONMENT/$([[ "$PLATFORM" == windows ]] && echo Scripts/python.exe || echo bin/python)" -r "$REQUIREMENTS"
 "$PY" -X utf8 run.py --init-config
-"$PY" -X utf8 run.py --check
+"$PY" -X utf8 run.py --device "$DEVICE" --check
 echo "环境已准备好 ($PLATFORM)。编辑 config.json 填写 token 和 onnx，然后执行 bash run.sh"

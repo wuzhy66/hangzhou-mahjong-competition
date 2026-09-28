@@ -70,12 +70,25 @@ def main():
     os.chdir(ROOT)
     config_file = ROOT / 'config.json'
     config = json.loads(config_file.read_text(encoding='utf-8-sig')) if config_file.exists() else {}
-    model = Path(config.get('onnx', 'bc-mortal-v4-r1-13.onnx')).expanduser()
-    if not model.is_absolute():
-        model = ROOT / model
-    with model.open('rb') as handle:
-        pointer = handle.read(256).startswith(b'version https://git-lfs.github.com/spec/v1')
-    if not pointer:
+    mode = config.get('inference_mode', 'single')
+    if mode not in ('single', 'probability_ensemble'):
+        raise ValueError('未知 inference_mode')
+    names = (config.get('ensemble_onnx', [f'bc-mortal-v4-r1-{n}.onnx' for n in (11, 14, 12)])
+             if mode == 'probability_ensemble' else [config.get('onnx', 'bc-mortal-v4-r1-13.onnx')])
+    if (not isinstance(names, list) or not names or any(not isinstance(n, str) or not n for n in names)
+            or mode == 'probability_ensemble' and len(names) != 3):
+        raise ValueError('ensemble_onnx 必须包含三个 ONNX 路径')
+    pointers = []
+    for name in names:
+        model = Path(name).expanduser()
+        if not model.is_absolute():
+            model = ROOT / model
+        if not model.is_file():
+            raise RuntimeError(f'缺少模型 {model}，请先放置对应完整 ONNX 权重')
+        with model.open('rb') as handle:
+            if handle.read(256).startswith(b'version https://git-lfs.github.com/spec/v1'):
+                pointers.append(model)
+    if not pointers:
         return
     if not shutil.which('git'):
         raise RuntimeError('请先安装 Git，再运行 setup.sh')
@@ -91,14 +104,15 @@ def main():
         subprocess.run(['git', 'config', '--local', 'filter.lfs.' + key,
                         shlex.quote(executable) + ' ' + command], check=True)
     subprocess.run(['git', 'config', '--local', 'filter.lfs.required', 'true'], check=True)
-    try:
-        model_name = model.resolve().relative_to(ROOT.resolve()).as_posix()
-    except ValueError:
-        raise RuntimeError('仓库外的 ONNX 是 LFS 指针，请先在其所属仓库下载完整模型')
-    subprocess.run(['git', 'lfs', 'pull', '--include=' + model_name], check=True)
-    with model.open('rb') as handle:
-        if handle.read(256).startswith(b'version https://git-lfs.github.com/spec/v1'):
-            raise RuntimeError('ONNX 仍是 LFS 指针；请仓库发布者检查模型是否已上传至远端 LFS')
+    for model in pointers:
+        try:
+            model_name = model.resolve().relative_to(ROOT.resolve()).as_posix()
+        except ValueError:
+            raise RuntimeError('仓库外的 ONNX 是 LFS 指针，请先在其所属仓库下载完整模型')
+        subprocess.run(['git', 'lfs', 'pull', '--include=' + model_name], check=True)
+        with model.open('rb') as handle:
+            if handle.read(256).startswith(b'version https://git-lfs.github.com/spec/v1'):
+                raise RuntimeError('ONNX 仍是 LFS 指针；请仓库发布者检查模型是否已上传至远端 LFS')
 
 
 if __name__ == '__main__':
