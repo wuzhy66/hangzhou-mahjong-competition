@@ -1,11 +1,12 @@
 {
   "token": "",
-  "onnx": "bc-mortal-v4-r1-13.onnx",
+  "onnx": "bc-mortal-v4-r1-17.onnx",
   "inference_mode": "single",
+  "discard_postprocess": false,
   "ensemble_onnx": [
-    "bc-mortal-v4-r1-11.onnx",
-    "bc-mortal-v4-r1-14.onnx",
-    "bc-mortal-v4-r1-12.onnx"
+    "bc-mortal-v4-r1-17.onnx",
+    "bc-mortal-v4-r1-12.onnx",
+    "bc-mortal-v4-r1-14.onnx"
   ],
   "mode": "auto",
   "server": "https://10.240.169.190:18080",

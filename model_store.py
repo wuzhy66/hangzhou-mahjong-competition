@@ -108,6 +108,51 @@ class ModelStore:
             self._close_model(dispose)
         return metadata
 
+    def switch_ensemble(self, names, hashes, device):
+        if (not isinstance(names, list) or len(names) != 3
+                or any(not isinstance(name, str) or Path(name).name != name
+                       or not name.startswith('bc-mortal-v4-r1-') or not name.endswith('.onnx')
+                       for name in names) or len(set(names)) != 3):
+            raise ValueError('热更仅接受三个不同的本地 r1 ONNX 文件名')
+        if (not isinstance(hashes, list) or len(hashes) != 3
+                or any(not isinstance(value, str) or len(value) != 64
+                       or any(char not in '0123456789abcdef' for char in value)
+                       for value in hashes)):
+            raise ValueError('热更须提供三个有效 SHA256')
+        if device not in ('cpu', 'cuda'):
+            raise ValueError('device 仅支持 cpu/cuda')
+        with self._switch_lock:
+            with self._condition:
+                if self._closing:
+                    raise RuntimeError('客户端正在退出')
+                config = dict(self._config, inference_mode='probability_ensemble',
+                              ensemble_onnx=list(names), ensemble_sha256=list(hashes),
+                              device=device, discard_postprocess=False)
+            # 加载、校验与预热期间，旧策略继续服务所有在途 Game。
+            model = self.loader(config)
+            dispose = None
+            try:
+                with self._condition:
+                    if self._closing:
+                        raise RuntimeError('客户端正在退出')
+                    metadata = self._metadata(model, config, enabled=True)
+                    self.writer(self.output/'active_model.json', metadata)
+                    old = self._active
+                    old['retired'] = True
+                    self._active = dict(model=model, refs=0, retired=False)
+                    self._entries.append(self._active)
+                    self._config = config
+                    self.discard_postprocess = False
+                    if old['refs'] == 0:
+                        self._entries.remove(old)
+                        dispose = old['model']
+            except BaseException:
+                self._close_model(model)
+                raise
+        if dispose is not None:
+            self._close_model(dispose)
+        return metadata
+
     def start_control(self, mode, record=None):
         if mode not in ('ranking', 'tournament'):
             raise ValueError('热切换仅用于打榜或比赛')
@@ -130,11 +175,16 @@ class ModelStore:
         try:
             if request.get('run_id') != self.run_id:
                 raise ValueError('请求属于其他客户端实例，拒绝旧请求')
-            if request.get('action') != 'fallback_cpu':
-                raise ValueError('仅支持 fallback_cpu')
             status.update(status='loading')
             self.writer(self.output/'model-control-status.json', status)
-            metadata = self.fallback_cpu()
+            if request.get('action') == 'fallback_cpu':
+                metadata = self.fallback_cpu()
+            elif request.get('action') == 'switch_ensemble':
+                metadata = self.switch_ensemble(request.get('ensemble_onnx'),
+                                                request.get('ensemble_sha256'),
+                                                request.get('device'))
+            else:
+                raise ValueError('仅支持 fallback_cpu 或 switch_ensemble')
             status.update(status='applied', active_model=metadata)
         except Exception as error:
             status.update(status='failed', error=f'{type(error).__name__}: {error}')

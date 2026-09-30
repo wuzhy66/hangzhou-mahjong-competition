@@ -1481,6 +1481,10 @@ def ranking(client, policy, me, resume_room=None, *, stop=None, play=play_game, 
         while not stop.is_set():
             reap(futures, completed)
             if room is None:
+                # 只在空闲匹配入口读取 follower 协调；在途房间和恢复原房不受影响。
+                from match_coordination import wait_for_peer_room
+                if not wait_for_peer_room(client, stop):
+                    return
                 # 非幂等 match 不直接重发；失败后先核对本人 active 索引。
                 try:
                     room = client.api("/api/match", {})["room_id"]

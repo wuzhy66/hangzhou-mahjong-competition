@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 
-DEFAULT_MODELS = [f'bc-mortal-v4-r1-{number}.onnx' for number in (11, 14, 12)]
+DEFAULT_MODELS = [f'bc-mortal-v4-r1-{number}.onnx' for number in (17, 12, 14)]
 
 
 def default_workers():

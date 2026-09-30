@@ -11,9 +11,3 @@ runs/
 .native/
 
 .build/
-
-# 本地模型权重不纳入源码快照
-*.onnx
-*.pt
-*.pth
-*.safetensors

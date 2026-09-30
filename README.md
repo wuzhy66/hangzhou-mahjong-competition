@@ -1,4 +1,7 @@
 # 麻将 ONNX 参赛客户端
+## 使用程序参赛的说明
+
+从官方平台取得参赛 token 与比赛 ID，确认 `server` 填写官方 API 基础地址（不带 `/portal` 或 `/api`），将 token 写入本地 `config.json` 并放好 ONNX 模型。运行 `bash setup.sh`、`bash run.sh --check-platform` 核对模型和账号后，用 `bash run.sh --tournament-id 官方比赛ID` 参赛；如果 token 已绑定比赛，保持 `"mode": "auto"` 并直接运行 `bash run.sh`。客户端会自动报名、确认出席和提交动作。
 
 ## 环境依赖
 
@@ -27,9 +30,10 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 ```json
 {
   "token": "填写参赛令牌",
-  "onnx": "bc-mortal-v4-r1-13.onnx",
+  "onnx": "bc-mortal-v4-r1-17.onnx",
   "inference_mode": "single",
-  "ensemble_onnx": ["bc-mortal-v4-r1-11.onnx", "bc-mortal-v4-r1-14.onnx", "bc-mortal-v4-r1-12.onnx"],
+  "discard_postprocess": false,
+  "ensemble_onnx": ["bc-mortal-v4-r1-17.onnx", "bc-mortal-v4-r1-12.onnx", "bc-mortal-v4-r1-14.onnx"],
   "mode": "auto",
   "server": "https://10.240.169.190:18080"
 }
@@ -38,9 +42,9 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 | 字段 | 说明 |
 |---|---|
 | token | 参赛令牌，运行前必填；提交 Git 时留空 |
-| onnx | ONNX 文件名或路径，相对路径以仓库目录为基准 |
+| onnx | ONNX 文件名或路径，相对路径以仓库目录为基准；单模型默认 r1-17 |
 | inference_mode | 默认 `single`，使用 `onnx` 指定的单模型；`probability_ensemble` 启用三模型概率集成 |
-| ensemble_onnx | 概率集成的三个不同 ONNX 路径，默认 r1-11、r1-14、r1-12 |
+| ensemble_onnx | 概率集成的三个不同 ONNX 路径，默认 r1-17、r1-12、r1-14 |
 | ensemble_sha256 | 可选，按 `ensemble_onnx` 顺序提供三个预期 SHA256，启动不匹配即报错 |
 | ensemble_workers | 可选，全客户端推理线程池容量，范围 3–48；CUDA 默认 3；CPU 按可用 CPU 数确定，至少 3、最多 48 |
 | device | 省略时按模式选择：单模型用 `cpu`，概率集成用 `cuda`。显式配置或 `--device` 优先；CUDA 需要独立 GPU Runtime |
@@ -52,27 +56,27 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 
 `auto` 下，全局 token 默认打榜，绑定比赛的 token 自动参加对应比赛。全局 token 参赛时，另加 `"tournament_id": "官方比赛ID"`，或使用下方命令参数。
 
-可选字段无需填写 `null`，直接省略即可。默认单次 ONNX 推理使用 1 个 CPU 线程、日志保存在 `runs/client`、启用 TLS 验证。模型须兼容本客户端的 6122 维观测和 74 维动作布局。模型文件不随源码提交，可自行提供 `bc-mortal-v4-r1-13.onnx`、`bc-mortal-v4-0-1.onnx` 或 `bc-mortal-v4-r1-6.onnx`；选择 `bc-mortal-v4-0-1.onnx` 并沿用其原部署线程配置时，可增加 `"threads": 8`。
+可选字段无需填写 `null`，直接省略即可。默认单次 ONNX 推理使用 1 个 CPU 线程、日志保存在 `runs/client`、启用 TLS 验证。模型须兼容本客户端的 6122 维观测和 74 维动作布局。模型文件不随源码提交；默认单模型需提供 `bc-mortal-v4-r1-17.onnx`，集成模式另需提供 r1-12、r1-14 的完整 ONNX 文件。也可自行指定其他兼容模型；选择 `bc-mortal-v4-0-1.onnx` 并沿用其原部署线程配置时，可增加 `"threads": 8`。
 
 可选 `"discard_postprocess": true` 开启 `shape_lookahead` 弃牌后处理（Top-k=4、Top-p=0.9）；默认关闭。
 
 ## 运行
 
-概率集成将三个模型对同一 observation 的**合法动作 softmax 概率等权相加，按 Round v8 转为 float32 后取 argmax**，覆盖所有动作类型。不执行额外弃牌搜索，因此集成模式必须关闭 `discard_postprocess`。模型名单在客户端启动时固定；不会自动跟随评测排行榜变化。
+概率集成将三个模型对同一 observation 的**合法动作 softmax 概率等权相加，按 Round v8 转为 float32 后取 argmax**，覆盖所有动作类型。不执行额外弃牌搜索，因此集成模式必须关闭 `discard_postprocess`。模型名单不会自动跟随评测排行榜变化，调整时需显式配置或热更。
 
 三个 ONNX Session 在启动时加载和预热，每个决策提交三路并行推理。所有对局共享常驻的有界线程池；CPU 模式下容量默认按可用 CPU 数确定（3–48），也可通过 `ensemble_workers` 调整。`threads` 是每个模型的 ORT 线程数，默认 1，避免模型内部线程造成过度争抢。CPU 多桌时将线程池固定为 3 会限制吞吐，应保留多桌的并行容量。并行能缩短有空闲 CPU 核时的等待，实际加速取决于硬件及对局并发，不保证等于单模型耗时；计算总量和模型内存仍约为三份。`active_model.json` 和启动日志记录三份模型 SHA、集成算法和线程配置。
 
 模型权重按当前仓库规则留在本地；新环境需提供三个完整 ONNX 文件，缺失或 SHA 不匹配时拒绝启动。`setup.sh` 按配置检查单模型或全部三模型；已有 LFS 指针会按需下载。
 
 ```bash
-# 默认单模型 r1-13 + CPU，离线检查
+# 默认单模型 r1-17 + CPU，不带后处理，离线检查
 bash run.sh --check
 # 三模型概率集成默认 CUDA + 20 ms，先安装独立 GPU 环境
 bash setup.sh --cuda
 # 离线检查，不发起对局
 bash run.sh --inference-mode probability_ensemble --check
 # 使用单模型
-bash run.sh --inference-mode single --onnx bc-mortal-v4-r1-13.onnx
+bash run.sh --inference-mode single --onnx bc-mortal-v4-r1-17.onnx
 # 显式替换三个集成模型
 bash run.sh --inference-mode probability_ensemble --ensemble-onnx a.onnx b.onnx c.onnx
 ```
@@ -152,6 +156,6 @@ bash run.sh --insecure
 python switch_to_cpu.py --output runs/client
 ```
 
-`--output` 必须与运行客户端的输出目录一致。工具读取当前 run_id，提交本地请求并等待确认；只有收到 applied 才报告成功。默认每 0.5 秒检查请求，再加载、SHA 校验并预热启动配置中 `onnx` 指定的原单模型（默认 r1-13）。加载期间正常对局继续；新决策原子切到 CPU，已经开始的决策继续持有旧模型，完成后才释放旧模型资源。回退模型 SHA 在客户端启动时固定。
+`--output` 必须与运行客户端的输出目录一致。工具读取当前 run_id，提交本地请求并等待确认；只有收到 applied 才报告成功。默认每 0.5 秒检查请求，再加载、SHA 校验并预热启动配置中 `onnx` 指定的原单模型（默认 r1-17）。加载期间正常对局继续；新决策原子切到 CPU，已经开始的决策继续持有旧模型，完成后才释放旧模型资源。回退模型 SHA 在客户端启动时固定。
 
 切换失败保留原模型，错误写入 model-control-status.json；成功同步 active_model.json 和 model_hot_switch 日志。不会改 token、比赛/房间或匹配进程，也不改变 config.json，因此重启仍按配置选择模式。显式请求热切换，不会因效果波动或未经确认的异常自动切换。CPU 模型加载时间与已卡住的 CUDA 调用不受 0.5 秒检查周期保证。

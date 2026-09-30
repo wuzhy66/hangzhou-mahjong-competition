@@ -161,7 +161,7 @@ def main():
     offline.add_argument("--check-platform", action="store_true", help="检查模型与平台身份，不报名、不匹配、不提交动作")
     args = parser.parse_args()
     os.chdir(ROOT)
-    config = {'discard_postprocess': False, 'token': '', 'onnx': 'bc-mortal-v4-r1-13.onnx', 'onnx_sha256': None, 'threads': 1, 'mode': 'auto', 'server': 'https://10.240.169.190:18080', 'output': 'runs/client', 'tournament_id': None, 'expected_uid': None, 'resume_room': None, 'insecure': False, 'ca_file': None}
+    config = {'discard_postprocess': False, 'token': '', 'onnx': 'bc-mortal-v4-r1-17.onnx', 'onnx_sha256': None, 'threads': 1, 'mode': 'auto', 'server': 'https://10.240.169.190:18080', 'output': 'runs/client', 'tournament_id': None, 'expected_uid': None, 'resume_room': None, 'insecure': False, 'ca_file': None}
     # 老配置省略 inference_mode 时保持原单模型；新模板也默认单模型，设备随推理模式选择。
     config.update(inference_mode='single', ensemble_onnx=list(DEFAULT_MODELS), ensemble_sha256=None,
                   ensemble_workers=None, device=None, gpu_memory_mb=1024,
@@ -169,7 +169,7 @@ def main():
     if args.init_config:
         destination = path(args.config)
         if not destination.exists():
-            template = {key: config[key] for key in ('token', 'onnx', 'mode', 'server', 'ensemble_onnx', 'gpu_batch_size', 'gpu_batch_wait_ms')}
+            template = {key: config[key] for key in ('token', 'onnx', 'mode', 'server', 'discard_postprocess', 'ensemble_onnx', 'gpu_batch_size', 'gpu_batch_wait_ms')}
             template['inference_mode'] = 'single'
             destination.write_text(json.dumps(template, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         print('配置文件: ' + str(destination))

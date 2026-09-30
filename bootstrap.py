@@ -73,8 +73,8 @@ def main():
     mode = config.get('inference_mode', 'single')
     if mode not in ('single', 'probability_ensemble'):
         raise ValueError('未知 inference_mode')
-    names = (config.get('ensemble_onnx', [f'bc-mortal-v4-r1-{n}.onnx' for n in (11, 14, 12)])
-             if mode == 'probability_ensemble' else [config.get('onnx', 'bc-mortal-v4-r1-13.onnx')])
+    names = (config.get('ensemble_onnx', [f'bc-mortal-v4-r1-{n}.onnx' for n in (17, 12, 14)])
+             if mode == 'probability_ensemble' else [config.get('onnx', 'bc-mortal-v4-r1-17.onnx')])
     if (not isinstance(names, list) or not names or any(not isinstance(n, str) or not n for n in names)
             or mode == 'probability_ensemble' and len(names) != 3):
         raise ValueError('ensemble_onnx 必须包含三个 ONNX 路径')
