@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def resolve_device(config):
-    mode = config.get('inference_mode', 'single')
+    mode = config.get('inference_mode', 'probability_ensemble')
     if mode not in ('single', 'probability_ensemble'):
         raise ValueError('inference_mode 必须为 single 或 probability_ensemble')
     device = config.get('device')

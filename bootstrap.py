@@ -70,7 +70,7 @@ def main():
     os.chdir(ROOT)
     config_file = ROOT / 'config.json'
     config = json.loads(config_file.read_text(encoding='utf-8-sig')) if config_file.exists() else {}
-    mode = config.get('inference_mode', 'single')
+    mode = config.get('inference_mode', 'probability_ensemble')
     if mode not in ('single', 'probability_ensemble'):
         raise ValueError('未知 inference_mode')
     names = (config.get('ensemble_onnx', [f'bc-mortal-v4-r1-{n}.onnx' for n in (17, 12, 14)])

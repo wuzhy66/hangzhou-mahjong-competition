@@ -1,7 +1,7 @@
 {
   "token": "",
   "onnx": "bc-mortal-v4-r1-17.onnx",
-  "inference_mode": "single",
+  "inference_mode": "probability_ensemble",
   "discard_postprocess": false,
   "ensemble_onnx": [
     "bc-mortal-v4-r1-17.onnx",

@@ -31,7 +31,7 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 {
   "token": "填写参赛令牌",
   "onnx": "bc-mortal-v4-r1-17.onnx",
-  "inference_mode": "single",
+  "inference_mode": "probability_ensemble",
   "discard_postprocess": false,
   "ensemble_onnx": ["bc-mortal-v4-r1-17.onnx", "bc-mortal-v4-r1-12.onnx", "bc-mortal-v4-r1-14.onnx"],
   "mode": "auto",
@@ -43,7 +43,7 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 |---|---|
 | token | 参赛令牌，运行前必填；提交 Git 时留空 |
 | onnx | ONNX 文件名或路径，相对路径以仓库目录为基准；单模型默认 r1-17 |
-| inference_mode | 默认 `single`，使用 `onnx` 指定的单模型；`probability_ensemble` 启用三模型概率集成 |
+| inference_mode | 默认 `probability_ensemble`，启用 r1-17、r1-12、r1-14 三模型概率集成；显式 `single` 使用 `onnx` 指定的单模型 |
 | ensemble_onnx | 概率集成的三个不同 ONNX 路径，默认 r1-17、r1-12、r1-14 |
 | ensemble_sha256 | 可选，按 `ensemble_onnx` 顺序提供三个预期 SHA256，启动不匹配即报错 |
 | ensemble_workers | 可选，全客户端推理线程池容量，范围 3–48；CUDA 默认 3；CPU 按可用 CPU 数确定，至少 3、最多 48 |
@@ -56,7 +56,7 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 
 `auto` 下，全局 token 默认打榜，绑定比赛的 token 自动参加对应比赛。全局 token 参赛时，另加 `"tournament_id": "官方比赛ID"`，或使用下方命令参数。
 
-可选字段无需填写 `null`，直接省略即可。默认单次 ONNX 推理使用 1 个 CPU 线程、日志保存在 `runs/client`、启用 TLS 验证。模型须兼容本客户端的 6122 维观测和 74 维动作布局。模型文件不随源码提交；默认单模型需提供 `bc-mortal-v4-r1-17.onnx`，集成模式另需提供 r1-12、r1-14 的完整 ONNX 文件。也可自行指定其他兼容模型；选择 `bc-mortal-v4-0-1.onnx` 并沿用其原部署线程配置时，可增加 `"threads": 8`。
+可选字段无需填写 `null`，直接省略即可。默认单次 ONNX 推理使用 1 个 CPU 线程、日志保存在 `runs/client`、启用 TLS 验证。模型须兼容本客户端的 6122 维观测和 74 维动作布局。模型文件不随源码提交；默认集成需提供 r1-17、r1-12、r1-14 三份完整 ONNX 文件。也可自行指定其他兼容模型；选择 `bc-mortal-v4-0-1.onnx` 并沿用其原部署线程配置时，可增加 `"threads": 8`。
 
 可选 `"discard_postprocess": true` 开启 `shape_lookahead` 弃牌后处理（Top-k=4、Top-p=0.9）；默认关闭。
 
@@ -69,12 +69,10 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 模型权重按当前仓库规则留在本地；新环境需提供三个完整 ONNX 文件，缺失或 SHA 不匹配时拒绝启动。`setup.sh` 按配置检查单模型或全部三模型；已有 LFS 指针会按需下载。
 
 ```bash
-# 默认单模型 r1-17 + CPU，不带后处理，离线检查
-bash run.sh --check
-# 三模型概率集成默认 CUDA + 20 ms，先安装独立 GPU 环境
+# 默认三模型概率集成 + CUDA，不带后处理
 bash setup.sh --cuda
 # 离线检查，不发起对局
-bash run.sh --inference-mode probability_ensemble --check
+bash run.sh --check
 # 使用单模型
 bash run.sh --inference-mode single --onnx bc-mortal-v4-r1-17.onnx
 # 显式替换三个集成模型
@@ -110,7 +108,7 @@ python3 -m venv .venv-cuda
 .venv-cuda/bin/python verify_gpu_batching.py --observations /path/to/verification_observations.npz
 ```
 
-`setup.sh` 默认安装 CPU 环境；`setup.sh --cuda` 另装 GPU 环境。`run.sh` 根据配置和 CLI 选择环境：默认单模型 + CPU；`--inference-mode probability_ensemble` 自动选 CUDA + 20 ms、batch=16。也可用 `--device cpu` 显式让集成跑 CPU。不要在默认配置中写死 device，否则它会覆盖模式的默认设备。
+`setup.sh` 默认安装 CPU 环境；`setup.sh --cuda` 另装 GPU 环境。`run.sh` 根据配置和 CLI 选择环境：默认三模型概率集成 + CUDA + 20 ms、batch=16；`--inference-mode single` 显式选择单模型 + CPU。也可用 `--device cpu` 显式让集成跑 CPU。不要在默认配置中写死 device，否则它会覆盖模式的默认设备。
 
 Windows 在 **Git Bash** 中执行，Linux 在 Bash 中执行：
 
