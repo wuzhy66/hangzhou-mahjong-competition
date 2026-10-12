@@ -1,4 +1,4 @@
-"""向运行中的客户端提交已校验的三模型概率集成热更请求。"""
+"""向打榜/比赛客户端提交三模型概率集成或 historical297 热更请求。"""
 import argparse
 import json
 from pathlib import Path
@@ -10,18 +10,27 @@ from switch_to_cpu import write_json
 
 def request_switch(output, config_path):
     output = Path(output).resolve()
-    config = json.loads(Path(config_path).read_text(encoding='utf-8'))
+    config = json.loads(Path(config_path).read_text(encoding='utf-8-sig'))
     if Path(config['output']).resolve() != output:
         raise ValueError('目标配置 output 与运行实例不一致')
-    if config.get('inference_mode') != 'probability_ensemble' or config.get('discard_postprocess') is not False:
-        raise ValueError('仅接受关闭后处理的概率集成配置')
+    mode = config.get('inference_mode')
+    if mode not in ('probability_ensemble', 'historical297') or config.get('discard_postprocess') is not False:
+        raise ValueError('仅接受关闭后处理的概率集成或 historical297 配置')
     active = json.loads((output / 'active_model.json').read_text(encoding='utf-8'))
     if not active.get('hot_switch_enabled') or active.get('state') != 'running':
         raise RuntimeError('该客户端尚未启用热更或已经退出')
-    request = dict(run_id=active['run_id'], request_id=uuid.uuid4().hex,
-                   action='switch_ensemble', requested_at=time.time(),
-                   ensemble_onnx=config['ensemble_onnx'],
-                   ensemble_sha256=config['ensemble_sha256'], device=config['device'])
+    if mode == 'historical297':
+        name = config.get('historical297_model', 'historical297.pt')
+        if name != 'historical297.pt' or config.get('device') not in ('cpu', 'cuda'):
+            raise ValueError('historical297 热更须使用本地 historical297.pt 与 cpu/cuda')
+        request = dict(run_id=active['run_id'], request_id=uuid.uuid4().hex,
+                       action='switch_historical297', requested_at=time.time(),
+                       historical297_model=name, device=config['device'])
+    else:
+        request = dict(run_id=active['run_id'], request_id=uuid.uuid4().hex,
+                       action='switch_ensemble', requested_at=time.time(),
+                       ensemble_onnx=config['ensemble_onnx'],
+                       ensemble_sha256=config['ensemble_sha256'], device=config['device'])
     write_json(output / 'model-control.json', request)
     return request
 

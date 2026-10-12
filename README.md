@@ -157,3 +157,99 @@ python switch_to_cpu.py --output runs/client
 `--output` 必须与运行客户端的输出目录一致。工具读取当前 run_id，提交本地请求并等待确认；只有收到 applied 才报告成功。默认每 0.5 秒检查请求，再加载、SHA 校验并预热启动配置中 `onnx` 指定的原单模型（默认 r1-17）。加载期间正常对局继续；新决策原子切到 CPU，已经开始的决策继续持有旧模型，完成后才释放旧模型资源。回退模型 SHA 在客户端启动时固定。
 
 切换失败保留原模型，错误写入 model-control-status.json；成功同步 active_model.json 和 model_hot_switch 日志。不会改 token、比赛/房间或匹配进程，也不改变 config.json，因此重启仍按配置选择模式。显式请求热切换，不会因效果波动或未经确认的异常自动切换。CPU 模型加载时间与已卡住的 CUDA 调用不受 0.5 秒检查周期保证。
+
+
+## historical297 · argmax
+
+WSL 新增独立启动入口，沿用 `config.json` 中的平台、身份和输出设置：
+
+```bash
+bash setup-historical297.sh                   # 新机器首次安装独立环境
+bash run-historical297.sh --check              # 仅离线加载校验，不连接平台
+bash run-historical297.sh --mode ranking       # 使用现有身份打榜
+# 无 CUDA 时可以显式加 --device cpu
+```
+
+启动前先正常退出使用同一身份的旧客户端；原有唯一身份锁仍然生效。
+此入口使用客户端目录内 `.venv-historical297` 的 PyTorch，默认 CUDA。也可用 `HISTORICAL297_PYTHON`
+指定兼容环境。通用 Python 入口支持 `--inference-mode historical297` 和
+`--historical297-model PATH`；模型路径默认 `historical297.pt`。
+固定模型 SHA256 为 `90799eafbb2a11a3eb586fcec6f945411a1bc4315b8cd329c1340a5732649453`。
+
+此策略使用冻结公开模型的7113维观测、41动作合法 mask 和原始 argmax，关闭 TF32，
+不使用 shape-lookahead。自杠和弃牌共享动作编号时按模型原规则优先自杠。
+客户端复用已对账的公开快照和历史，保存实际7113维模型输入，模型源码独立放在
+`historical297_source`，不替换原有6122维/74动作策略。
+`discard_postprocess` 必须为 false。运行时原有“回退 CPU”控制仍表示切到配置中的
+旧 ONNX 单模型；297的CPU推理可通过下述显式策略热更选择 `device: "cpu"`。
+
+离线检查：固定权重 SHA、CPU/CUDA 模型预热，以及本地历史快照回放脚本
+`PYTHONPATH=. .venv-historical297/bin/python tests/check_historical297_snapshots.py`。
+
+模型权重已包含在客户端根目录；单独复制本目录后，执行上述安装命令即可，不依赖上级 rlai-car 项目。Python 虚拟环境不保证跨机器可搬迁，新机器请重新安装依赖。
+
+## 三模型与 historical297 双向热更
+
+打榜和比赛共用同一控制监听。新版客户端支持三模型 probability ensemble 与
+historical297 · argmax 双向切换，不需要重新匹配或重新接入比赛。未提交请求时不会
+加载候选策略，不改变原有模型、推理、线程或出牌路径；没有自动切换策略的逻辑。
+
+从客户端目录执行，`--output` 与目标配置的 `output` 都必须指向本实例：
+
+```bash
+python switch_ensemble.py --output runs/client --config switch-target.json
+```
+
+切入297的 `switch-target.json`（无需 token）：
+
+```json
+{
+  "output": "runs/client",
+  "inference_mode": "historical297",
+  "historical297_model": "historical297.pt",
+  "device": "cuda",
+  "discard_postprocess": false
+}
+```
+
+切回三模型使用同一命令，目标配置的 `inference_mode` 为 `probability_ensemble`，
+提供 `ensemble_onnx` 三个本地文件名及对应的 `ensemble_sha256`，并设置
+`device: "cuda"`、`discard_postprocess: false`。r1-17/r1-12/r1-14 的顺序应与原配置一致。
+工具只传递策略和权重选择；线程数、ensemble_workers、batch参数沿用运行实例，
+不修改平台身份、房间、比赛或启动配置。只有 `applied` 表示完成，超时不能当作成功。
+
+297热更只接受本地 `historical297.pt`，loader 校验上述固定 SHA 并预热。
+加载、校验或预热失败时保留旧策略；加载期间旧策略继续服务，新策略发布后
+新决策使用新观测编码，在途决策仍持有原模型至完成。
+
+**运行前提**：当前进程必须已经用新版代码启动，并且其 Python 环境同时具备
+PyTorch 和 ONNX Runtime CUDA 依赖；仅更新磁盘文件不会升级已经运行的进程。
+可在后续计划启动时使用 `.venv-historical297/bin/python run.py --config ...` 选择
+任一初始策略（不要用强制初始297的 wrapper 来启动三模型）。只有 ONNX 环境而缺少
+PyTorch 的实例会拒绝297切换并保留旧策略，不会自动安装依赖或重启。
+本地控制文件仍使用 run_id 隔离旧实例请求，已有 CPU 回退及三模型热更命令保持兼容。
+
+### 双策略 CUDA 常驻快速切换（显式启用）
+
+```bash
+bash setup-resident.sh    # 新建独立 .venv-resident，已有环境拒绝覆盖
+bash run-resident.sh --config config.json --check
+bash run-resident.sh --config config.json
+```
+
+初始策略仍由配置选择，打榜和比赛均适用。也可在兼容环境中使用
+`python run.py --resident-strategies --device cuda --config config.json`。
+默认 `resident_strategies: false`，未启用时保留原 ModelStore、500ms监听及加载路径。
+常驻模式仅支持固定 r1-17/r1-12/r1-14 三模型和固定 historical297，启动时全部校验、
+加载并预热完成后才连接平台；`active_model.json` 的 `resident_ready: true` 表示准备完成。
+
+仍使用上述 `switch_ensemble.py` 提交目标配置。常驻模式监听间隔为20ms，
+收到合法请求后仅写入状态、切换已有模型引用，不加载权重、不运行预热、不卸载旧策略。
+两策略一直保留到客户端退出，在途决策可以跨越多次切换而继续使用原模型。
+SHA/设备/文件名与常驻目标不符的请求直接拒绝，不会在局中偷偷加载新模型。
+初次紧急 CPU 回退仍需加载单模型，不属于此快速切换保证范围。
+
+常驻模式增加显存占用，要求同一环境同时有 PyTorch CUDA 和 ONNX Runtime GPU；
+启动准备失败不会接入比赛。请求确认仍以 `applied` 为准，20ms是轮询间隔，
+不是最坏端到端延迟或1秒出牌窗口的硬保证。更新代码后需在安全边界重启实例一次；
+之后双策略间切换不需要重启、不改变平台身份或房间。

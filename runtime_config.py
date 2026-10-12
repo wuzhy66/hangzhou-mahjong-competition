@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parent
 
 def resolve_device(config):
     mode = config.get('inference_mode', 'probability_ensemble')
-    if mode not in ('single', 'probability_ensemble'):
-        raise ValueError('inference_mode 必须为 single 或 probability_ensemble')
+    if mode not in ('single', 'probability_ensemble', 'historical297'):
+        raise ValueError('inference_mode 必须为 single、probability_ensemble 或 historical297')
     device = config.get('device')
     if device is None:
         return 'cuda' if mode == 'probability_ensemble' else 'cpu'
@@ -21,7 +21,7 @@ def resolve_device(config):
 def launch_device(argv=None):
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--config', default='config.json')
-    parser.add_argument('--inference-mode', choices=('single', 'probability_ensemble'))
+    parser.add_argument('--inference-mode', choices=('single', 'probability_ensemble', 'historical297'))
     parser.add_argument('--device', choices=('cpu', 'cuda'))
     parser.add_argument('--init-config', action='store_true')
     args, _ = parser.parse_known_args(argv)

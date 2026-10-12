@@ -1,0 +1,8 @@
+# 独立双策略 CUDA 环境，不能同时安装 CPU onnxruntime。
+numpy==2.5.3
+onnxruntime-gpu==1.26.0
+filelock==4.0.1
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2
+torch==2.9.0

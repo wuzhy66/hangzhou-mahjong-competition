@@ -61,11 +61,16 @@ def load_configured_model(config):
     mode = config['inference_mode']
     device = resolve_device(config)
     gpu_memory_mb = config.get('gpu_memory_mb', 1024)
+    if mode == 'historical297':
+        if config['discard_postprocess']:
+            raise ValueError('historical297 仅支持原始 argmax，请关闭 discard_postprocess')
+        from historical297_policy import load_historical297
+        return load_historical297(path(config.get('historical297_model', 'historical297.pt')), device, config['threads'])
     if mode == 'single':
         return load_model(path(config['onnx']), device, threads=config['threads'],
                           expected_sha256=config['onnx_sha256'], gpu_memory_mb=gpu_memory_mb)
     if mode != 'probability_ensemble':
-        raise ValueError('inference_mode 必须为 single 或 probability_ensemble')
+        raise ValueError('inference_mode 必须为 single、probability_ensemble 或 historical297')
     if config['discard_postprocess']:
         raise ValueError('概率集成直接取概率和 argmax，请关闭 discard_postprocess')
     names = config['ensemble_onnx']
@@ -147,13 +152,15 @@ def main():
     for name in ("server", "output", "tournament-id", "expected-uid", "resume-room", "ca-file", "onnx", "onnx-sha256"):
         parser.add_argument("--" + name)
     parser.add_argument("--threads", type=int)
-    parser.add_argument('--inference-mode', choices=('single', 'probability_ensemble'))
+    parser.add_argument('--inference-mode', choices=('single', 'probability_ensemble', 'historical297'))
+    parser.add_argument('--historical297-model')
     parser.add_argument('--ensemble-onnx', nargs=3, metavar='ONNX')
     parser.add_argument('--ensemble-workers', type=int)
     parser.add_argument('--device', choices=('cpu', 'cuda'))
     parser.add_argument('--gpu-memory-mb', type=int)
     parser.add_argument('--gpu-batch-size', type=int)
     parser.add_argument('--gpu-batch-wait-ms', type=float)
+    parser.add_argument('--resident-strategies', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--insecure", action=argparse.BooleanOptionalAction, default=None)
     offline = parser.add_mutually_exclusive_group()
     offline.add_argument("--check", action="store_true", help="离线检查模型 SHA、输入输出和 Session 预热")
@@ -163,9 +170,9 @@ def main():
     os.chdir(ROOT)
     config = {'discard_postprocess': False, 'token': '', 'onnx': 'bc-mortal-v4-r1-17.onnx', 'onnx_sha256': None, 'threads': 1, 'mode': 'auto', 'server': 'https://10.240.169.190:18080', 'output': 'runs/client', 'tournament_id': None, 'expected_uid': None, 'resume_room': None, 'insecure': False, 'ca_file': None}
     # 省略 inference_mode 与新模板默认三模型概率集成，设备默认 CUDA。
-    config.update(inference_mode='probability_ensemble', ensemble_onnx=list(DEFAULT_MODELS), ensemble_sha256=None,
+    config.update(historical297_model='historical297.pt', inference_mode='probability_ensemble', ensemble_onnx=list(DEFAULT_MODELS), ensemble_sha256=None,
                   ensemble_workers=None, device=None, gpu_memory_mb=1024,
-                  gpu_batch_size=16, gpu_batch_wait_ms=20.0)
+                  gpu_batch_size=16, gpu_batch_wait_ms=20.0, resident_strategies=False)
     if args.init_config:
         destination = path(args.config)
         if not destination.exists():
@@ -191,6 +198,23 @@ def main():
     if config["discard_postprocess"]:
         from postprocess import warmup_postprocess
         warmup_postprocess()
+    if type(config['resident_strategies']) is not bool:
+        raise ValueError('resident_strategies 必须为 true/false')
+    store_class = ModelStore
+    if config['resident_strategies']:
+        from resident_store import ResidentModelStore
+        store_class = ResidentModelStore
+    if args.check and config['resident_strategies']:
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            fallback = dict(config, inference_mode='single', device='cpu')
+            store = store_class(config, temporary, loader=load_configured_model, fallback_config=fallback)
+            try:
+                print(json.dumps(dict(status='passed', resident_ready=True,
+                                      sha256=store.current.sha256, device='cuda')))
+            finally:
+                store.close()
+        return 0
     if args.check:
         model = load_configured_model(config)
         try:
@@ -236,7 +260,7 @@ def main():
         if not fallback_config['onnx_sha256']:
             with Path(fallback_config['onnx']).open('rb') as handle:
                 fallback_config['onnx_sha256'] = hashlib.file_digest(handle, 'sha256').hexdigest()
-        policy = ModelStore(config, output, loader=load_configured_model, fallback_config=fallback_config)
+        policy = store_class(config, output, loader=load_configured_model, fallback_config=fallback_config)
         stack.callback(policy.close)
         policy.discard_postprocess = config["discard_postprocess"]
         me = request(client, "/api/me", stop)

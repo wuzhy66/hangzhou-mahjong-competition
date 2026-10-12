@@ -153,6 +153,44 @@ class ModelStore:
             self._close_model(dispose)
         return metadata
 
+    def switch_historical297(self, name, device):
+        # 只新增显式入口；不改旧加载/决策路径，也不接受任意权重。
+        if name != 'historical297.pt':
+            raise ValueError('热更仅接受本地 historical297.pt 固定权重')
+        if device not in ('cpu', 'cuda'):
+            raise ValueError('device 仅支持 cpu/cuda')
+        with self._switch_lock:
+            with self._condition:
+                if self._closing:
+                    raise RuntimeError('客户端正在退出')
+                config = dict(self._config, inference_mode='historical297',
+                              historical297_model=name, device=device,
+                              discard_postprocess=False)
+            # loader 内校验固定 SHA 并预热；缺 PyTorch/CUDA 等失败保留旧模型。
+            model = self.loader(config)
+            dispose = None
+            try:
+                with self._condition:
+                    if self._closing:
+                        raise RuntimeError('客户端正在退出')
+                    metadata = self._metadata(model, config, enabled=True)
+                    self.writer(self.output/'active_model.json', metadata)
+                    old = self._active
+                    old['retired'] = True
+                    self._active = dict(model=model, refs=0, retired=False)
+                    self._entries.append(self._active)
+                    self._config = config
+                    self.discard_postprocess = False
+                    if old['refs'] == 0:
+                        self._entries.remove(old)
+                        dispose = old['model']
+            except BaseException:
+                self._close_model(model)
+                raise
+        if dispose is not None:
+            self._close_model(dispose)
+        return metadata
+
     def start_control(self, mode, record=None):
         if mode not in ('ranking', 'tournament'):
             raise ValueError('热切换仅用于打榜或比赛')
@@ -183,8 +221,11 @@ class ModelStore:
                 metadata = self.switch_ensemble(request.get('ensemble_onnx'),
                                                 request.get('ensemble_sha256'),
                                                 request.get('device'))
+            elif request.get('action') == 'switch_historical297':
+                metadata = self.switch_historical297(request.get('historical297_model'),
+                                                     request.get('device'))
             else:
-                raise ValueError('仅支持 fallback_cpu 或 switch_ensemble')
+                raise ValueError('仅支持 fallback_cpu、switch_ensemble 或 switch_historical297')
             status.update(status='applied', active_model=metadata)
         except Exception as error:
             status.update(status='failed', error=f'{type(error).__name__}: {error}')
