@@ -7,5 +7,5 @@ cd "$ROOT"
 PY="$ROOT/.venv-historical297/bin/python"
 "$PY" -m pip install -r "$ROOT/requirements-historical297.txt"
 "$PY" -X utf8 bootstrap.py
-"$PY" -X utf8 run.py --inference-mode historical297 --device cpu --check
+"$PY" -X utf8 run.py --inference-mode historical297 --device cpu --no-resident-strategies --check
 echo 'historical297 已准备好；使用 bash run-historical297.sh 启动。'

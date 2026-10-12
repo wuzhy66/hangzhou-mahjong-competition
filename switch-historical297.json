@@ -1,0 +1,7 @@
+{
+  "output": "runs/client",
+  "inference_mode": "historical297",
+  "device": "cuda",
+  "discard_postprocess": false,
+  "historical297_model": "historical297.pt"
+}

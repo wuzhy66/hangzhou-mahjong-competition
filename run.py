@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 
 # 完整复用 WSL OnnxPolicy，单模型默认 CPU、概率集成默认 CUDA / cuda_graph=False。
 import inference_runtime
-from runtime_config import resolve_device
+from runtime_config import resolve_device, resolve_resident
 import numpy as np
 from onnx_tools.policy import OnnxPolicy
 
@@ -169,15 +169,16 @@ def main():
     args = parser.parse_args()
     os.chdir(ROOT)
     config = {'discard_postprocess': False, 'token': '', 'onnx': 'bc-mortal-v4-r1-17.onnx', 'onnx_sha256': None, 'threads': 1, 'mode': 'auto', 'server': 'https://10.240.169.190:18080', 'output': 'runs/client', 'tournament_id': None, 'expected_uid': None, 'resume_room': None, 'insecure': False, 'ca_file': None}
-    # 省略 inference_mode 与新模板默认三模型概率集成，设备默认 CUDA。
-    config.update(historical297_model='historical297.pt', inference_mode='probability_ensemble', ensemble_onnx=list(DEFAULT_MODELS), ensemble_sha256=None,
+    # 默认 historical297 CUDA，并常驻三模型以便比赛/打榜中快速热更。
+    config.update(historical297_model='historical297.pt', inference_mode='historical297', ensemble_onnx=list(DEFAULT_MODELS), ensemble_sha256=None,
                   ensemble_workers=None, device=None, gpu_memory_mb=1024,
-                  gpu_batch_size=16, gpu_batch_wait_ms=20.0, resident_strategies=False)
+                  gpu_batch_size=16, gpu_batch_wait_ms=20.0, resident_strategies=None)
     if args.init_config:
         destination = path(args.config)
         if not destination.exists():
             template = {key: config[key] for key in ('token', 'onnx', 'mode', 'server', 'discard_postprocess', 'ensemble_onnx', 'gpu_batch_size', 'gpu_batch_wait_ms')}
-            template['inference_mode'] = 'probability_ensemble'
+            template.update(inference_mode='historical297', historical297_model='historical297.pt',
+                            device='cuda', threads=1, resident_strategies=True)
             destination.write_text(json.dumps(template, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         print('配置文件: ' + str(destination))
         return 0
@@ -198,8 +199,7 @@ def main():
     if config["discard_postprocess"]:
         from postprocess import warmup_postprocess
         warmup_postprocess()
-    if type(config['resident_strategies']) is not bool:
-        raise ValueError('resident_strategies 必须为 true/false')
+    config['resident_strategies'] = resolve_resident(config)
     store_class = ModelStore
     if config['resident_strategies']:
         from resident_store import ResidentModelStore

@@ -1,7 +1,15 @@
 # 麻将 ONNX 参赛客户端
+
+默认策略（2026-10-12起）：比赛与打榜均使用 **historical297 · argmax / CUDA / threads=1 / post=false**。
+默认历史策略在 CUDA 下启用双策略常驻，启动前同时加载、校验及预热 historical297 和
+r1-17/r1-12/r1-14 概率集成；之后可在局中通过控制请求双向切换。
+新机器默认入口先在 WSL/Linux 执行 `bash setup-resident.sh`，随后使用 `bash run.sh`；
+`run.sh` 会选择 `.venv-resident`，也可用 `RESIDENT_PYTHON` 指定兼容环境。
+旧的显式 single/CPU/非默认 ensemble 配置仍可使用；要关闭常驻请指定 `--no-resident-strategies`。
+修改启动默认值不会改变已运行进程；新启动按配置生效，当前实例的策略以真实 action SHA 为准。
 ## 使用程序参赛的说明
 
-从官方平台取得参赛 token 与比赛 ID，确认 `server` 填写官方 API 基础地址（不带 `/portal` 或 `/api`），将 token 写入本地 `config.json` 并放好 ONNX 模型。运行 `bash setup.sh`、`bash run.sh --check-platform` 核对模型和账号后，用 `bash run.sh --tournament-id 官方比赛ID` 参赛；如果 token 已绑定比赛，保持 `"mode": "auto"` 并直接运行 `bash run.sh`。客户端会自动报名、确认出席和提交动作。
+从官方平台取得参赛 token 与比赛 ID，确认 `server` 填写官方 API 基础地址（不带 `/portal` 或 `/api`），将 token 写入本地 `config.json` 并放好 historical297 与三份 ONNX 模型。运行 `bash setup-resident.sh`、`bash run.sh --check-platform` 核对模型和账号后，用 `bash run.sh --tournament-id 官方比赛ID` 参赛；如果 token 已绑定比赛，保持 `"mode": "auto"` 并直接运行 `bash run.sh`。客户端会自动报名、确认出席和提交动作。
 
 ## 环境依赖
 
@@ -31,7 +39,11 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 {
   "token": "填写参赛令牌",
   "onnx": "bc-mortal-v4-r1-17.onnx",
-  "inference_mode": "probability_ensemble",
+  "inference_mode": "historical297",
+  "historical297_model": "historical297.pt",
+  "device": "cuda",
+  "threads": 1,
+  "resident_strategies": true,
   "discard_postprocess": false,
   "ensemble_onnx": ["bc-mortal-v4-r1-17.onnx", "bc-mortal-v4-r1-12.onnx", "bc-mortal-v4-r1-14.onnx"],
   "mode": "auto",
@@ -43,11 +55,11 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 |---|---|
 | token | 参赛令牌，运行前必填；提交 Git 时留空 |
 | onnx | ONNX 文件名或路径，相对路径以仓库目录为基准；单模型默认 r1-17 |
-| inference_mode | 默认 `probability_ensemble`，启用 r1-17、r1-12、r1-14 三模型概率集成；显式 `single` 使用 `onnx` 指定的单模型 |
+| inference_mode | 默认 `historical297` 原始 argmax；`probability_ensemble` 使用三模型；`single` 使用 `onnx` 指定单模型 |
 | ensemble_onnx | 概率集成的三个不同 ONNX 路径，默认 r1-17、r1-12、r1-14 |
 | ensemble_sha256 | 可选，按 `ensemble_onnx` 顺序提供三个预期 SHA256，启动不匹配即报错 |
 | ensemble_workers | 可选，全客户端推理线程池容量，范围 3–48；CUDA 默认 3；CPU 按可用 CPU 数确定，至少 3、最多 48 |
-| device | 省略时按模式选择：单模型用 `cpu`，概率集成用 `cuda`。显式配置或 `--device` 优先；CUDA 需要独立 GPU Runtime |
+| device | 省略时 single 用 `cpu`，historical297 和概率集成用 `cuda`；显式配置或 `--device` 优先 |
 | gpu_memory_mb | CUDA 每个模型的 ORT arena 上限，默认 1024 MiB；不包含驱动/context 等额外显存 |
 | gpu_batch_size | CUDA 集成跨桌合批上限，默认 16，范围 1–16；模型须支持动态 batch |
 | gpu_batch_wait_ms | 主动合批窗口，默认 20 ms，允许 0–20 ms；从最早请求入队时计算 |
@@ -69,14 +81,14 @@ HTTP/SSE、TLS 和线程调度使用 Python 标准库。推理核心保留 WSL �
 模型权重按当前仓库规则留在本地；新环境需提供三个完整 ONNX 文件，缺失或 SHA 不匹配时拒绝启动。`setup.sh` 按配置检查单模型或全部三模型；已有 LFS 指针会按需下载。
 
 ```bash
-# 默认三模型概率集成 + CUDA，不带后处理
-bash setup.sh --cuda
+# 默认 historical297 CUDA，双策略常驻，不带后处理
+bash setup-resident.sh
 # 离线检查，不发起对局
 bash run.sh --check
 # 使用单模型
-bash run.sh --inference-mode single --onnx bc-mortal-v4-r1-17.onnx
+bash run.sh --no-resident-strategies --inference-mode single --device cpu --onnx bc-mortal-v4-r1-17.onnx
 # 显式替换三个集成模型
-bash run.sh --inference-mode probability_ensemble --ensemble-onnx a.onnx b.onnx c.onnx
+bash run.sh --no-resident-strategies --inference-mode probability_ensemble --ensemble-onnx a.onnx b.onnx c.onnx
 ```
 
 离线验证与基准（使用运行客户端的 Python 环境）：
@@ -161,6 +173,9 @@ python switch_to_cpu.py --output runs/client
 
 ## historical297 · argmax
 
+以下 `run-historical297.sh` 是保留的旧 PyTorch 专用入口，显式关闭双策略常驻。
+后续比赛/打榜默认请使用上方 `run.sh` 或 `run-resident.sh`，确保具备三模型快速切换能力。
+
 WSL 新增独立启动入口，沿用 `config.json` 中的平台、身份和输出设置：
 
 ```bash
@@ -229,7 +244,7 @@ PyTorch 和 ONNX Runtime CUDA 依赖；仅更新磁盘文件不会升级已经�
 PyTorch 的实例会拒绝297切换并保留旧策略，不会自动安装依赖或重启。
 本地控制文件仍使用 run_id 隔离旧实例请求，已有 CPU 回退及三模型热更命令保持兼容。
 
-### 双策略 CUDA 常驻快速切换（显式启用）
+### 双策略 CUDA 常驻快速切换
 
 ```bash
 bash setup-resident.sh    # 新建独立 .venv-resident，已有环境拒绝覆盖
@@ -239,7 +254,7 @@ bash run-resident.sh --config config.json
 
 初始策略仍由配置选择，打榜和比赛均适用。也可在兼容环境中使用
 `python run.py --resident-strategies --device cuda --config config.json`。
-默认 `resident_strategies: false`，未启用时保留原 ModelStore、500ms监听及加载路径。
+默认 historical297 CUDA 启用常驻；可显式设置 `resident_strategies: false`，保留原 ModelStore、500ms监听及加载路径。
 常驻模式仅支持固定 r1-17/r1-12/r1-14 三模型和固定 historical297，启动时全部校验、
 加载并预热完成后才连接平台；`active_model.json` 的 `resident_ready: true` 表示准备完成。
 
@@ -253,3 +268,8 @@ SHA/设备/文件名与常驻目标不符的请求直接拒绝，不会在局中
 启动准备失败不会接入比赛。请求确认仍以 `applied` 为准，20ms是轮询间隔，
 不是最坏端到端延迟或1秒出牌窗口的硬保证。更新代码后需在安全边界重启实例一次；
 之后双策略间切换不需要重启、不改变平台身份或房间。
+
+仓库提供无凭据目标模板 `switch-probability_ensemble.json` 和 `switch-historical297.json`。
+默认 `output` 为 `runs/client`；操作其他实例时，先复制模板并将 `output` 改成实际实例目录，
+再执行 `python switch_ensemble.py --output 实际实例目录 --config 修改后的目标文件`。
+配置中的 `output` 必须与命令一致，只有收到 `applied` 确认后才算切换完成。
